@@ -292,7 +292,9 @@ impl eframe::App for ScannerApp {
         ui::settings::show(&ctx, self);
     }
 
-    fn on_exit(&mut self) {
+    /// Takes the GL context under the glow backend; we have no GPU resources of
+    /// our own to release, so it is unused.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.dirty_since = None;
         self.save_now();
         if let Some(tx) = self.shutdown.take() {
