@@ -3,19 +3,13 @@
 use egui::{RichText, ScrollArea};
 use scanner_core::api::{Room, RoomAttributes};
 
-use crate::app::{with_opacity, ScannerApp};
+use crate::app::ScannerApp;
 use crate::state::RoomEntry;
 use crate::theme;
 
 pub fn show(ui_root: &mut egui::Ui, app: &mut ScannerApp) {
-    let opacity = app.effective_opacity();
-
     egui::CentralPanel::default()
-        .frame(
-            egui::Frame::NONE
-                .fill(with_opacity(theme::BG, opacity))
-                .inner_margin(egui::Margin::same(12)),
-        )
+        .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(12)))
         .show(ui_root, |ui| {
             if let Some(err) = app.config_error.clone() {
                 config_error_banner(ui, app, &err);

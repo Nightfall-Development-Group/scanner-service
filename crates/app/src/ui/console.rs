@@ -2,20 +2,14 @@
 
 use egui::{RichText, ScrollArea};
 
-use crate::app::{with_opacity, ScannerApp};
+use crate::app::ScannerApp;
 use crate::theme;
 
 pub fn show(ui_root: &mut egui::Ui, app: &mut ScannerApp) {
-    let opacity = app.effective_opacity();
-
     egui::Panel::bottom("console")
         .resizable(true)
         .default_size(140.0)
-        .frame(
-            egui::Frame::NONE
-                .fill(with_opacity(theme::PANEL, opacity))
-                .inner_margin(egui::Margin::same(8)),
-        )
+        .frame(egui::Frame::NONE.inner_margin(egui::Margin::same(8)))
         .show(ui_root, |ui| {
             ScrollArea::vertical()
                 .stick_to_bottom(true)

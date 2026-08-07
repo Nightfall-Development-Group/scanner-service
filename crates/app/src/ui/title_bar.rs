@@ -14,7 +14,7 @@
 
 use egui::{Align, CornerRadius, Layout, Response, RichText, Sense, ViewportCommand};
 
-use crate::app::{with_opacity, ScannerApp};
+use crate::app::ScannerApp;
 use crate::theme;
 
 pub const HEIGHT: f32 = 34.0;
@@ -60,15 +60,9 @@ fn status_dot(ui: &mut egui::Ui, colour: egui::Color32) -> Response {
 }
 
 pub fn show(ui_root: &mut egui::Ui, app: &mut ScannerApp) {
-    let opacity = app.effective_opacity();
-
     egui::Panel::top("title_bar")
         .exact_size(HEIGHT)
-        .frame(
-            egui::Frame::NONE
-                .fill(with_opacity(theme::TITLE_BAR, opacity))
-                .inner_margin(egui::Margin::symmetric(8, 0)),
-        )
+        .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(8, 0)))
         .show(ui_root, |ui| {
             let ctx = ui.ctx().clone();
 

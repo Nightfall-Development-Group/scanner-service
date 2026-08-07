@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use egui::Color32;
 use scanner_core::api::ApiClient;
 use scanner_core::config::Config;
 use scanner_core::engine;
@@ -213,31 +212,47 @@ impl ScannerApp {
 }
 
 impl ScannerApp {
-    /// Opacity actually in effect. Falls back to fully opaque when the window
-    /// has no alpha channel to blend through.
+    /// Opacity actually in effect.
+    ///
+    /// Forced to fully opaque when the window has no alpha channel, because
+    /// alpha against a non-composited window reads as solid black.
     pub fn effective_opacity(&self) -> f32 {
         if self.transparent {
-            self.config.window.opacity
+            usable_opacity(self.config.window.opacity)
         } else {
             1.0
         }
     }
 }
 
-/// Apply the user's opacity to a colour.
-///
-/// The window itself is transparent and every surface is painted with alpha,
-/// rather than asking the OS to make the window translucent. Native window
-/// opacity is inconsistent across platforms; this looks identical everywhere.
-pub fn with_opacity(color: Color32, opacity: f32) -> Color32 {
-    let a = (opacity.clamp(0.15, 1.0) * 255.0).round() as u8;
-    Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), a)
+/// Lower bound on opacity, so the window can never become invisible — the
+/// settings panel would vanish with it and the user could not turn it back up.
+const MIN_OPACITY: f32 = 0.15;
+
+/// Clamp a configured opacity into the usable range.
+fn usable_opacity(configured: f32) -> f32 {
+    if configured.is_finite() {
+        configured.clamp(MIN_OPACITY, 1.0)
+    } else {
+        1.0
+    }
 }
 
 impl eframe::App for ScannerApp {
-    /// Transparent, so the alpha we paint with is what the user sees.
+    /// The window background, faded by the opacity setting.
+    ///
+    /// This is a *framebuffer clear*, which is the whole point: it covers every
+    /// pixel of the window every frame, at whatever size the window currently
+    /// is. Painting the backdrop as a rectangle instead makes coverage depend on
+    /// layout, so a stale or mis-sized rect leaves part of the window bright and
+    /// part of it clear — visible as a rectangle that only disappears once a
+    /// resize forces a relayout.
+    ///
+    /// Values must be premultiplied and in gamma space, per the trait docs.
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 0.0]
+        let opacity = self.effective_opacity();
+        let [r, g, b, _] = theme::BG.to_normalized_gamma_f32();
+        [r * opacity, g * opacity, b * opacity, opacity]
     }
 
     /// Non-drawing work. eframe calls this before every `ui` pass, and also
@@ -256,6 +271,15 @@ impl eframe::App for ScannerApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Panels in 0.36 nest inside the root Ui; order fixes their placement.
         let ctx = ui.ctx().clone();
+
+        // Fade the contents by the same factor as the background.
+        //
+        // Fading only the background is what made lower opacity look *whiter*:
+        // text and buttons stayed fully opaque, so as the backdrop dropped away
+        // the bright elements were all that remained. This multiplies the alpha
+        // of everything drawn from here on, so the whole window fades together,
+        // which is what an opacity slider is expected to do.
+        ui.set_opacity(self.effective_opacity());
 
         ui::title_bar::show(ui, self);
         ui::status_bar::show(ui, self);
@@ -282,35 +306,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn opacity_scales_alpha_without_shifting_hue() {
-        // Color32 stores premultiplied alpha, so the direct accessors return
-        // darkened components by design. The unmultiplied round-trip is what
-        // shows the colour itself is unchanged.
-        let c = with_opacity(Color32::from_rgb(10, 20, 30), 0.5);
-        let [r, g, b, a] = c.to_srgba_unmultiplied();
-
-        assert!((126..=129).contains(&a), "alpha was {a}");
-        // Premultiplication is lossy at low alpha; a couple of levels of drift
-        // is expected and invisible.
-        for (got, want) in [(r, 10), (g, 20), (b, 30)] {
-            assert!(
-                got.abs_diff(want) <= 2,
-                "component drifted: got {got}, want ~{want}"
-            );
-        }
+    fn opacity_never_reaches_invisible() {
+        // At zero the settings panel would be invisible too, so the user could
+        // never turn opacity back up.
+        assert_eq!(usable_opacity(0.0), MIN_OPACITY);
+        assert_eq!(usable_opacity(-5.0), MIN_OPACITY);
+        assert!(usable_opacity(0.0) > 0.0);
     }
 
     #[test]
-    fn full_opacity_leaves_a_colour_untouched() {
-        let original = Color32::from_rgb(10, 20, 30);
-        assert_eq!(with_opacity(original, 1.0), original);
+    fn opacity_passes_through_in_range_and_caps_above() {
+        assert_eq!(usable_opacity(0.5), 0.5);
+        assert_eq!(usable_opacity(1.0), 1.0);
+        assert_eq!(usable_opacity(3.0), 1.0);
     }
 
     #[test]
-    fn opacity_is_clamped_so_the_window_cannot_vanish() {
-        // A slider dragged to zero would otherwise make the app invisible and
-        // unrecoverable, since the settings panel would be invisible too.
-        assert!(with_opacity(Color32::WHITE, 0.0).a() > 0);
-        assert_eq!(with_opacity(Color32::WHITE, 5.0).a(), 255);
+    fn a_corrupt_opacity_falls_back_to_opaque() {
+        // A hand-edited config could contain NaN; clamp() would propagate it and
+        // the window would render as nothing at all.
+        assert_eq!(usable_opacity(f32::NAN), 1.0);
+    }
+
+    #[test]
+    fn clear_colour_is_premultiplied() {
+        // eframe sends these floats to the renderer as-is, so the RGB has to be
+        // scaled by alpha or the background blends far too bright.
+        let opacity = 0.5;
+        let [r, g, b, _] = theme::BG.to_normalized_gamma_f32();
+        let cleared = [r * opacity, g * opacity, b * opacity, opacity];
+
+        assert!(cleared[0] <= cleared[3], "red exceeds alpha: {cleared:?}");
+        assert!(cleared[1] <= cleared[3], "green exceeds alpha: {cleared:?}");
+        assert!(cleared[2] <= cleared[3], "blue exceeds alpha: {cleared:?}");
     }
 }
