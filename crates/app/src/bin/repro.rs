@@ -17,6 +17,26 @@
 use std::time::Instant;
 
 fn main() -> eframe::Result<()> {
+    // eframe and wgpu report the surface's alpha-mode decision through `log`.
+    // The line that matters is egui_wgpu's:
+    //
+    //   "Transparent window was requested, but the active wgpu surface does not
+    //    support a `CompositeAlphaMode` with transparency."
+    //
+    // If that appears at startup and not after a resize, the window being solid
+    // until resized is explained outright. This binary has no
+    // `windows_subsystem = "windows"`, so it keeps a console and the log is
+    // visible as it runs.
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Info)
+        .filter_module("egui_wgpu", log::LevelFilter::Debug)
+        .filter_module("wgpu_core", log::LevelFilter::Warn)
+        .filter_module("wgpu_hal", log::LevelFilter::Warn)
+        .format_timestamp_millis()
+        .init();
+
+    log::info!("repro starting; resize the window and watch for surface messages");
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("eframe transparency repro")

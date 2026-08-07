@@ -27,8 +27,39 @@ fn transparency_requested() -> bool {
     )
 }
 
+/// Send eframe/wgpu logging to a file beside the config.
+///
+/// The release build has no console on Windows, so without this the surface and
+/// alpha-mode messages that explain rendering problems are simply lost. The one
+/// worth looking for is egui_wgpu's warning that the surface does not support a
+/// `CompositeAlphaMode` with transparency.
+fn start_logging() -> Option<std::path::PathBuf> {
+    let path = scanner_core::config::Config::default_path()
+        .ok()?
+        .with_file_name("scanner.log");
+    std::fs::create_dir_all(path.parent()?).ok()?;
+    let file = std::fs::File::create(&path).ok()?;
+
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Info)
+        .filter_module("egui_wgpu", log::LevelFilter::Debug)
+        .filter_module("wgpu_core", log::LevelFilter::Warn)
+        .filter_module("wgpu_hal", log::LevelFilter::Warn)
+        .format_timestamp_millis()
+        .target(env_logger::Target::Pipe(Box::new(file)))
+        .try_init()
+        .ok()?;
+
+    Some(path)
+}
+
 fn main() -> eframe::Result<()> {
+    let log_path = start_logging();
     let transparent = transparency_requested();
+    log::info!("starting; transparent window requested: {transparent}");
+    if let Some(p) = &log_path {
+        log::info!("logging to {}", p.display());
+    }
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
