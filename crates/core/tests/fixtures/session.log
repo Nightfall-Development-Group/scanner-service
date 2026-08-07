@@ -1,0 +1,60 @@
+2026-08-07T09:26:40.673Z,0.673518,ba3c,6,Info [FLog::CreatorOutput] Info: DataModel Loading rbxasset://places/Mobile.rbxl
+2026-08-07T09:26:58.125Z,18.125952,ab24,6 [FLog::Output] ! Joining game '00000000-0000-0000-0000-000000000000' place 100000001 at 203.0.113.10
+2026-08-07T09:26:58.131Z,18.131926,ab24,7 [FLog::Network] UDMUX Address = 203.0.113.10, Port = 63300 | RCC Server Address = 203.0.113.10, Port = 63300
+2026-08-07T09:27:03.017Z,23.017553,b90c,6,Info [FLog::CreatorOutput] Couldn't find EndlessFirewall100
+2026-08-07T09:27:22.833Z,42.833370,05c0,6,Info [FLog::CreatorOutput] removing Lobby
+2026-08-07T09:28:17.069Z,97.069229,b90c,6,Info [FLog::CreatorOutput] removing Lobby
+2026-08-07T09:28:28.884Z,108.884636,ba3c,6,Info [FLog::CreatorOutput] -1 false false nil Data 1
+2026-08-07T09:28:28.887Z,108.887657,ba3c,6,Info [FLog::CreatorOutput] 3001 false false nil Data 1
+2026-08-07T09:28:28.889Z,108.889671,ba3c,6,Info [FLog::CreatorOutput] -1 false false nil Data 1
+2026-08-07T09:28:36.092Z,116.092834,ab24,6,Info [FLog::CreatorOutput] 3002 false false nil Data 1
+2026-08-07T09:28:44.636Z,124.636055,ba3c,6 [FLog::Output] ! Joining game '00000000-0000-0000-0000-000000000000' place 100000001 at 203.0.113.10
+2026-08-07T09:28:44.644Z,124.644073,8760,7 [FLog::Network] UDMUX Address = 203.0.113.10, Port = 56437 | RCC Server Address = 203.0.113.10, Port = 56437
+2026-08-07T09:28:46.608Z,126.608849,b90c,6,Info [DFLog::NetworkClient] Client:Disconnect
+2026-08-07T09:28:47.258Z,127.258163,ba3c,6,Info [DFLog::NetworkClient] Client:Disconnect
+2026-08-07T09:28:54.580Z,134.580063,84a4,6,Info [FLog::CreatorOutput] Room Name: Start
+2026-08-07T09:30:02.666Z,202.666992,ba3c,6,Info [FLog::CreatorOutput] Room Name: Straight2
+2026-08-07T09:30:06.633Z,206.633179,8760,6,Info [FLog::CreatorOutput] Room Name: BentRight2
+2026-08-07T09:30:09.582Z,209.582550,ba3c,6,Info [FLog::CreatorOutput] Room Name: LeftStraightW/Room1
+2026-08-07T09:30:14.326Z,214.326752,ba3c,6,Info [FLog::CreatorOutput] Room Name: StraightLowered1
+2026-08-07T09:30:22.624Z,222.624542,8760,6,Info [FLog::CreatorOutput] Room Name: RightStraightW/Room1
+2026-08-07T09:30:27.132Z,227.132980,ba3c,6,Info [FLog::CreatorOutput] Room Name: StraightRightWindow3
+2026-08-07T09:30:31.090Z,231.090775,ba3c,6,Info [FLog::CreatorOutput] Room Name: LongStraightSubmarineCrash
+2026-08-07T09:30:37.250Z,237.250595,ba3c,6,Info [FLog::CreatorOutput] Room Name: LeftTurn1
+2026-08-07T09:30:42.940Z,242.940231,ba3c,6,Info [FLog::CreatorOutput] Room Name: 3WayZigZagStairsLeftW/2RoomsDestroyed
+2026-08-07T09:30:52.931Z,252.931900,ba3c,6,Info [FLog::CreatorOutput] Room Name: StraightOffice3
+2026-08-07T09:30:57.323Z,257.323486,ba3c,6,Info [FLog::CreatorOutput] Room Name: StraightWindows1
+2026-08-07T09:31:01.698Z,261.698669,8760,6,Info [FLog::CreatorOutput] Room Name: RiverStart
+2026-08-07T09:31:07.160Z,267.160583,b90c,6,Info [FLog::CreatorOutput] Room Name: RiverLongDamaged1
+2026-08-07T09:31:11.525Z,271.525177,b90c,6,Info [FLog::CreatorOutput] Room Name: RiverDoubleSideCOffice
+2026-08-07T09:31:18.890Z,278.890289,ba3c,6,Info [FLog::CreatorOutput] Room Name: RiverLongCrossings
+2026-08-07T09:31:18.997Z,278.997406,ab24,6,Info [FLog::CreatorOutput] [SPRINT EFFECT WEARS OFF]
+2026-08-07T09:31:47.120Z,307.120789,8760,6,Info [FLog::CreatorOutput] Room Name: RiverDamaged2
+2026-08-07T09:31:49.016Z,309.016052,ab24,6,Info [FLog::CreatorOutput] Room Name: RiverRightTurn
+2026-08-07T09:31:52.031Z,312.031281,ab24,6,Info [FLog::CreatorOutput] Room Name: RiverEnd
+2026-08-07T09:31:57.420Z,317.420563,ba3c,6,Info [FLog::CreatorOutput] Room Name: StraightDoubleSide1
+2026-08-07T09:32:00.480Z,320.480011,8760,6,Info [FLog::CreatorOutput] [SPRINT EFFECT WEARS OFF]
+2026-08-07T09:32:01.853Z,321.853027,ba3c,6,Info [FLog::CreatorOutput] Room Name: StraightBrokenRightWall
+2026-08-07T09:32:05.176Z,325.176270,ba3c,6,Info [FLog::CreatorOutput] Room Name: 3WayStairsUpLeftDestroyed
+2026-08-07T09:32:17.912Z,337.912628,84a4,6,Info [FLog::CreatorOutput] Room Name: OutskirtsBridgeStart
+2026-08-07T09:32:22.496Z,342.496643,ba3c,6,Info [FLog::CreatorOutput] Room Name: LockedOutskirts5
+2026-08-07T09:32:40.420Z,360.420593,b90c,6,Info [FLog::CreatorOutput] Room Name: OutskirtsOpenDrop
+2026-08-07T09:32:44.727Z,364.727600,b90c,6,Info [FLog::CreatorOutput] Room Name: Outskirts4Way3
+2026-08-07T09:32:49.862Z,369.862671,ba3c,6,Info [FLog::CreatorOutput] hit a wall CollisionPart
+2026-08-07T09:32:50.327Z,370.327362,ba3c,6,Info [FLog::CreatorOutput] Room Name: OutskirtsPitPlank1
+2026-08-07T09:32:55.961Z,375.961365,ba3c,6,Info [FLog::CreatorOutput] Room Name: Outskirts3WayShortEnd
+2026-08-07T09:33:03.566Z,383.566589,05c0,6,Info [FLog::CreatorOutput] Room Name: TurretDeadEnd
+2026-08-07T09:33:09.336Z,389.336426,8760,6,Info [FLog::CreatorOutput] hit a wall Part
+2026-08-07T09:33:46.359Z,426.359406,ba3c,6,Info [FLog::CreatorOutput] Room Name: LeftStraightVentDestroyed
+2026-08-07T09:33:59.465Z,439.465668,ab24,6,Info [FLog::CreatorOutput] Room Name: StraightDamaged1
+2026-08-07T09:34:03.743Z,443.743439,ba3c,6,Info [FLog::CreatorOutput] Room Name: Straight3
+2026-08-07T09:34:07.914Z,447.914703,ab24,6,Info [FLog::CreatorOutput] Room Name: TrueObservatory2
+2026-08-07T09:34:36.956Z,476.956543,b90c,6,Info [FLog::CreatorOutput] Room Name: StraightBrokenPipe
+2026-08-07T09:34:41.139Z,481.139557,ba3c,6,Info [FLog::CreatorOutput] Room Name: StairsCorridor3
+2026-08-07T09:35:18.197Z,518.197266,aa40,6,Info [FLog::CreatorOutput] Room Name: StraightOffice2
+2026-08-07T09:35:22.563Z,522.563416,b90c,6,Info [FLog::CreatorOutput] Room Name: Straight8
+2026-08-07T09:35:26.532Z,526.532104,aa40,6,Info [FLog::CreatorOutput] Room Name: 3WayRight
+2026-08-07T09:35:38.770Z,538.770508,ba3c,6,Info [FLog::CreatorOutput] Room Name: SearchlightsTramStart
+2026-08-07T09:36:04.494Z,564.494995,ba3c,6,Info [FLog::CreatorOutput] Room Name: SearchlightsTramEnd
+2026-08-07T09:37:00.269Z,620.269104,5adc,6,Info [FLog::CreatorOutput] Room Name: SearchlightsEncounter
+2026-08-07T09:38:14.744Z,694.744751,ab24,6,Info [FLog::CreatorOutput] reached

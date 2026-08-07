@@ -1,0 +1,85 @@
+{
+    "room_name": "000",
+    "case_name": "000",
+    "slug": "000",
+    "description": "This room is exclusive to The Vault. A room in the Mantle Extraction that spawns after completing The Hosts' game of fragment collecting; to progress, one must walk down the pit, they will not die of fall damage. This is the room that precedes The Vault, the room name of which is called 'ActualEnd'.",
+    "roomtype": "Mantle Extraction",
+    "documented_by": "100000000000000001",
+    "last_edited_by": "100000000000000002",
+    "documented_at": "2025-11-18T18:08:58.786576Z",
+    "last_edited_at": "2025-12-17T13:19:00Z",
+    "version": 1,
+    "edit_reason": null,
+    "soft_deleted": false,
+    "scan_state": "unspawnable",
+    "images": [
+        {
+            "id": 13567,
+            "image_url": "https://cdn.nightfalldivision.com/000/5780ed5917c7320b.webp",
+            "object_key": "000/5780ed5917c7320b.webp",
+            "position": 0,
+            "caption": null,
+            "is_primary": true,
+            "uploaded_by": "100000000000000001",
+            "uploaded_at": "2026-01-20T22:16:15.081201Z"
+        },
+        {
+            "id": 13568,
+            "image_url": "https://cdn.nightfalldivision.com/000/13a0dff48d331a0e.webp",
+            "object_key": "000/13a0dff48d331a0e.webp",
+            "position": 1,
+            "caption": null,
+            "is_primary": false,
+            "uploaded_by": "100000000000000001",
+            "uploaded_at": "2026-01-20T22:16:15.081201Z"
+        },
+        {
+            "id": 13569,
+            "image_url": "https://cdn.nightfalldivision.com/000/efeb0d0f2bd8fc81.webp",
+            "object_key": "000/efeb0d0f2bd8fc81.webp",
+            "position": 2,
+            "caption": null,
+            "is_primary": false,
+            "uploaded_by": "100000000000000001",
+            "uploaded_at": "2026-01-20T22:16:15.081201Z"
+        },
+        {
+            "id": 13570,
+            "image_url": "https://cdn.nightfalldivision.com/000/85bcf9ac783d517d.webp",
+            "object_key": "000/85bcf9ac783d517d.webp",
+            "position": 3,
+            "caption": null,
+            "is_primary": false,
+            "uploaded_by": "100000000000000001",
+            "uploaded_at": "2026-01-20T22:16:15.081201Z"
+        },
+        {
+            "id": 13571,
+            "image_url": "https://cdn.nightfalldivision.com/000/5434e819da35cae1.webp",
+            "object_key": "000/5434e819da35cae1.webp",
+            "position": 4,
+            "caption": null,
+            "is_primary": false,
+            "uploaded_by": "100000000000000001",
+            "uploaded_at": "2026-01-20T22:16:15.081201Z"
+        },
+        {
+            "id": 13572,
+            "image_url": "https://cdn.nightfalldivision.com/000/03258891744e43af.webp",
+            "object_key": "000/03258891744e43af.webp",
+            "position": 5,
+            "caption": null,
+            "is_primary": false,
+            "uploaded_by": "100000000000000001",
+            "uploaded_at": "2026-01-20T22:16:15.081201Z"
+        }
+    ],
+    "tags": [
+        "Dead Zone"
+    ],
+    "contributor": {
+        "display_name": "Test Contributor",
+        "avatar": null
+    },
+    "attributes": null
+}

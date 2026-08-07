@@ -1,0 +1,204 @@
+# Scanner v2 — implementation plan
+
+## Context
+
+`franktorio-pressure-scanner` (v1) is an unmaintained PyQt5 app that tails Roblox
+logs, extracts room names, and shows what researchers documented about each room.
+It works, but three things make it a dead end: it is Python-and-PyInstaller heavy,
+its architecture puts blocking network I/O on the UI thread, and — decisively —
+the backend it talks to no longer exists. The web stack was rebuilt around
+`db-api.nightfalldivision.com`, and none of v1's endpoints survived.
+
+So v2 is a ground-up rewrite in Rust against the new API. The goal is a small
+single-file binary per platform, no runtime dependencies, and an architecture in
+which v1's whole class of state-desync bugs cannot be expressed.
+
+Windows is the primary target, Linux second, macOS for parity.
+
+### Decisions taken
+
+| Question | Decision |
+|---|---|
+| Client auth | Per-user API key, entered in settings. No secret ships in the binary. |
+| Write path | **Read-only.** VIEW key only. The client never writes to the corpus. |
+| Multiplayer sync | **Dropped.** No realtime service exists, and it was v1's buggiest area. |
+| Feature scope | Image carousel, server geolocation, debug console, frameless overlay. |
+
+---
+
+## Architecture
+
+A two-crate workspace. The split is the point: **`scanner-core` has no GUI
+dependency**, so the parsing, tailing and API logic is testable headlessly. v1 had
+no test surface at all because everything reached into `MainWindow`.
+
+```
+crates/core   scanner-core   no GUI deps — runs under `cargo test` with no display
+  config      atomic JSON persistence, per-OS paths, holds the user's API key
+  logsrc/     finder | tailer | parser
+  api/        db-api client: lookup → detail, ETag caching, backoff
+  geo         ipinfo.io lookup from the udmux log line
+  model       Room, RoomImage, RoomAttributes, LookupResponse
+  event       the Event enum crossing the thread boundary
+  engine      orchestrator; owns the tokio tasks
+
+crates/app    scanner-app    eframe binary — thin views, no logic
+```
+
+### The one rule that shapes everything
+
+Workers never touch the UI. Every background task owns an
+`mpsc::UnboundedSender<Event>`; the egui update loop drains the receiver once per
+frame and folds events into a single `AppState`. There is no shared mutable state
+between threads and no widget handle outside the UI thread.
+
+This is the direct answer to v1's largest defect class — state scattered across
+`MainWindow` attributes, initialised in three places, mutated from worker threads
+(`widgets.py:716` called `setText()` off the GUI thread). In immediate mode the UI
+is a pure function of `AppState`, so "widget disagrees with model" is not a state
+the program can reach.
+
+### Correctness rules from the backend
+
+These are contract details that will silently corrupt behaviour if missed:
+
+- **Never derive a slug.** Always `GET /api/rooms/lookup?q=<name>` → use
+  `exact.slug`. Only `match ∈ {slug, room_name, squashed}` is authoritative;
+  `prefix`/`substring` are candidates, `none` means not in the database.
+- **Snowflakes are JSON strings**, not numbers. `documented_by`, `last_edited_by`,
+  `uploaded_by` are all `Option<String>`. Never `u64`.
+- **Images arrive as absolute URLs** on `cdn.nightfalldivision.com` — do not build
+  them. Order by `position`; `is_primary` is the hero.
+- **`Authorization: Bearer <key>` on every request.** There is no anonymous access.
+
+### Where a run begins
+
+A run starts at the room named **`Start`**. The lobby, the teleport, and the
+`Client:Disconnect` pair that marks that teleport are all noise — the scanner
+ignores everything before the most recent `Room Name: Start`.
+
+This has one non-obvious consequence, which `logsrc::resume` exists to handle:
+the game server's `UDMUX` address is logged roughly ten seconds *before* the
+first room, so seeking straight to `Start` would throw away the address
+geolocation needs. Resuming is therefore two results, not one — scan the whole
+file to establish state (server address, and the current room if we are joining
+mid-run), then tail from the run-start offset.
+
+If no `Start` is present the player is already mid-run, so we resume at end of
+file and report only new activity, carrying the current room forward so the UI
+is not blank. Reading from byte zero in that situation is what made v1 duplicate
+every room.
+
+---
+
+## What changes relative to v1
+
+| v1 defect | v2 approach |
+|---|---|
+| Blocking image downloads on the UI thread (`windowed.py:447`) | Downloads are tokio tasks; bytes arrive as `Event::ImageReady`. A frame never blocks. |
+| Non-atomic config writes wipe settings on interrupt (`appdata.py:69`) | Write to a tempfile, `fsync`, atomic rename. Saves debounced, not per slider tick. |
+| Five daemon threads + three asyncio loops | One tokio runtime; tasks, not threads. |
+| GUI signals passed via module globals (`websocket.py:82`) | Typed `Event` enum over a channel. |
+| Fixed 0.5 s log poll | `notify` filesystem events, with a slow poll as a safety net. |
+| Room name recovered by re-parsing rendered markup (`widgets.py:704`) | Name lives in the model; the view only renders it. |
+| Windows-only fonts substituted elsewhere | Fonts embedded in the binary. |
+| Hand-computed geometry mixed with layouts | egui layout throughout. |
+
+---
+
+## Portability
+
+Windows is the primary target, Linux second, macOS for parity. Verified status:
+
+| Target | How it is verified |
+|---|---|
+| Linux | Native build + full test suite |
+| Windows | `cargo check --target x86_64-pc-windows-gnu` locally, plus native CI |
+| macOS | CI only — cross-compiling needs Apple's SDK, which cannot be installed elsewhere |
+
+**Cross-compiling cannot verify this project**, because rustls needs a C toolchain
+built for the target. That is why the CI matrix (`.github/workflows/ci.yml`) builds
+and tests natively on all three runners, and why it was set up early rather than
+left to the release milestone — it is the only real answer to "does this work on
+Windows?"
+
+Two choices follow from that:
+
+- **rustls uses the `ring` provider, not the default `aws-lc-rs`.** Both need a C
+  compiler; neither cross-compiles for free. But `aws-lc-sys` additionally wants
+  NASM on Windows and compiles a large amount of C, whereas `ring` built for
+  `windows-gnu` here with nothing but mingw. This is a build-friction preference,
+  not a correctness one — reqwest's `rustls` feature would also work.
+- **No `notify` dependency.** The engine polls every 500 ms rather than watching
+  the filesystem. Half a second of latency on a room display is imperceptible, and
+  a poll cannot miss an event the way a watcher can on network or overlay
+  filesystems. Worth revisiting only if profiling says so.
+
+Everything OS-specific is confined to `logsrc/finder` (log directory discovery)
+and `config` (per-OS config paths via `directories`, atomic replace via
+`tempfile::persist`). No `#[cfg]` blocks appear anywhere else.
+
+## Milestones
+
+Each is independently verifiable; nothing is merged unverified.
+
+**M1 — core skeleton. ✅ done.** Workspace, `config` with atomic writes,
+`logsrc/parser` and `logsrc/resume` with fixtures from a real captured session.
+
+**M2 — API client. ✅ done.** `lookup` → `{slug}` flow, typed models, client-side
+token bucket, `retry_after` honoured on 429, backoff on 503/5xx, TTL+LRU cache.
+Live tests in `tests/live_api.rs` (ignored by default) verify against db-api.
+
+> **Caching note.** Conditional GETs do *not* help here. `304` is implemented only
+> on `/api/rooms/export` (`_get_routes.py:414`), which needs `BULK_OPERATIONS`; a
+> VIEW key cannot use it. `GET /api/rooms/{slug}` returns a full body every time —
+> verified live, `If-None-Match: "1"` still answered `200`. The `ETag` /
+> `X-Room-Version` on detail exist for `If-Match` on writes, which a read-only
+> client never performs. So caching is an in-memory LRU keyed by slug with a TTL,
+> not conditional requests. Room documentation changes rarely, so a generous TTL
+> plus the recently-seen dedupe keeps request volume very low.
+
+**M3 — engine. ✅ done.** `logsrc/finder` (per-OS discovery incl. Wine/Proton/Sober
+prefix globbing), `logsrc/tailer` (append, truncation, rotation, partial-line
+withholding), `geo` (ipinfo.io with a private-address guard), `event`, and
+`engine` wiring tail → parse → resolve → `Event`. Verified by
+`cargo run -p scanner-core --example replay -- <log>`, which runs the whole
+pipeline headlessly.
+
+**M4 — UI shell.** eframe, frameless always-on-top viewport, custom title bar,
+opacity/scale, room detail rendering. First runnable app.
+
+**M5 — images.** Async fetch, decode, carousel with keyboard nav and auto-rotate,
+bounded LRU cache (v1's cache was unbounded — `sync_window.py:609`).
+
+**M6 — polish.** Debug console as a second viewport, geolocation, first-run API key
+entry, settings.
+
+**M7 — release.** Cross-platform CI producing three binaries, mirroring v1's
+`deploy.yml` shape but for cargo.
+
+---
+
+## Verification
+
+- `cargo test -p scanner-core` — runs with no display. Parser fixtures assert room
+  extraction, the udmux IP, and the double-disconnect debounce.
+- A headless `replay` example in core: feed it a log file, print the resulting
+  `Event` stream. Exercises the whole pipeline minus rendering.
+- Live smoke test against db-api with a VIEW key: lookup a known room, fetch
+  detail, confirm a 304 on the second request.
+- Manual: run beside the game on Windows, confirm rooms appear and the overlay
+  does not steal focus.
+
+---
+
+## What I still need from you
+
+1. **A VIEW key** for local development against db-api.
+2. **Sample Roblox log files** — ideally a full session including a disconnect.
+   v1's parser keys on the substrings `"room name"`, `"udmux"` and
+   `"[flog::network] client:disconnect"`. I want to build fixtures from real logs
+   rather than trusting v1's assumptions, since that parsing is the one part with
+   no backend to validate it against.
+3. Confirmation that **`RoomNames.txt`** in database-service is the canonical name
+   list — useful for testing lookup coverage.

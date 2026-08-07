@@ -1,0 +1,18 @@
+[workspace]
+members = ["crates/core", "crates/app"]
+resolver = "2"
+
+[workspace.package]
+version = "2.0.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.82"
+
+# Small, fast binaries. `opt-level = "z"` trades a little speed for size; the
+# workload is I/O-bound, so the trade is free in practice.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,12 @@
+{
+    "query": "alti room",
+    "match": "squashed",
+    "exact": {
+        "slug": "altiroom",
+        "case_name": "AltiRoom?",
+        "room_name": "altiroom?",
+        "roomtype": "Hadal Blacksite"
+    },
+    "candidates": [],
+    "total": 1
+}

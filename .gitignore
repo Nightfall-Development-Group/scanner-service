@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+
+# Never commit an API key. The dev key lives outside the repo entirely
+# (~/.nfd-scanner-dev-key); these patterns are a second line of defence.
+.env
+*.key
+scanner-key*
+
+# Raw Roblox logs carry a userid, username, server IPs and a join ticket with
+# personal data. Keep them local; commit only the scrubbed fixture.
+*.raw.log
