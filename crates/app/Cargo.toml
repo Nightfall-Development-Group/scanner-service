@@ -5,21 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-# glow (OpenGL) rather than eframe's default wgpu backend.
-#
-# Transparent windows on Windows are broken under wgpu -- upstream
-# emilk/egui#2680 and #4451 -- and the white-region-on-resize bug in
-# particular was fixed on glow but never on wgpu. This app is a translucent
-# overlay whose primary target is Windows, so the backend choice is not a
-# preference here.
-eframe = { version = "0.36.0", default-features = false, features = [
-    "glow",
-    "accesskit",
-    "default_fonts",
-    "links",
-    "wayland",
-    "x11",
-] }
+eframe = "0.36.0"
 egui = "0.36.0"
 scanner-core = { path = "../core" }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "sync", "macros"] }

@@ -22,12 +22,15 @@ jobs:
           - os: windows-latest
             label: windows-x86_64
             binary: scanner-app.exe
+            repro: repro.exe
           - os: macos-latest
             label: macos-aarch64
             binary: scanner-app
+            repro: repro
           - os: ubuntu-latest
             label: linux-x86_64
             binary: scanner-app
+            repro: repro
 
     steps:
       - uses: actions/checkout@v5
@@ -47,7 +50,7 @@ jobs:
             libxkbcommon-dev libssl-dev
 
       - name: Build
-        run: cargo build --release -p scanner-app
+        run: cargo build --release -p scanner-app --bins
 
       - name: Report size
         shell: bash
@@ -56,7 +59,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: scanner-${{ matrix.label }}
-          path: target/release/${{ matrix.binary }}
+          path: |
+            target/release/${{ matrix.binary }}
+            target/release/${{ matrix.repro }}
           if-no-files-found: error
           # Long enough to be useful, short enough not to accumulate.
           retention-days: 30
