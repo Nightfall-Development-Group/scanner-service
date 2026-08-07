@@ -1,0 +1,62 @@
+name: Build
+
+# Produces downloadable binaries for every push to main, and on demand from the
+# Actions tab. Separate from CI so the test matrix stays fast; this job does the
+# slow optimised build (fat LTO, one codegen unit) that CI has no reason to.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x86_64
+            binary: scanner-app.exe
+          - os: macos-latest
+            label: macos-aarch64
+            binary: scanner-app
+          - os: ubuntu-latest
+            label: linux-x86_64
+            binary: scanner-app
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.label }}
+
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libssl-dev
+
+      - name: Build
+        run: cargo build --release -p scanner-app
+
+      - name: Report size
+        shell: bash
+        run: ls -lh target/release/${{ matrix.binary }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scanner-${{ matrix.label }}
+          path: target/release/${{ matrix.binary }}
+          if-no-files-found: error
+          # Long enough to be useful, short enough not to accumulate.
+          retention-days: 30
