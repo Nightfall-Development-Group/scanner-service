@@ -77,6 +77,8 @@ impl eframe::App for Repro {
 
                 ui.add_space(12.0);
                 ui.monospace(format!("backend      {BACKEND}"));
+                ui.monospace(format!("system theme {:?}", ui.ctx().system_theme()));
+                ui.monospace(format!("active theme {:?}", ui.ctx().theme()));
                 ui.monospace(format!("size         {:.0} x {:.0}", size.x, size.y));
                 ui.monospace(format!("pixels/point {:.2}", ui.ctx().pixels_per_point()));
                 ui.monospace(format!("resizes seen {}", self.resizes));

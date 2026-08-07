@@ -46,7 +46,21 @@ pub fn apply(ctx: &Context) {
     visuals.widgets.active.fg_stroke = Stroke::new(1.0, TEXT);
     visuals.selection.bg_fill = ACCENT.linear_multiply(0.35);
 
-    ctx.set_visuals(visuals);
+    // Pin the theme rather than following the OS.
+    //
+    // `Context::set_visuals` writes to whichever theme is active *at the moment
+    // it is called* — `style_mut_of(self.theme(), …)`. This runs at startup,
+    // before Windows has reported its system theme, so it lands on Dark; when
+    // the OS then says "light mode", egui switches to the Light style, which we
+    // never configured, and the app renders in egui's stock white with dark
+    // text. Linux reports no system theme, so it stayed Dark there and the bug
+    // was invisible in testing.
+    //
+    // This is a dark overlay by design, so express that directly and write the
+    // palette into both variants so nothing can switch out from under us.
+    ctx.set_theme(egui::ThemePreference::Dark);
+    ctx.set_visuals_of(egui::Theme::Dark, visuals.clone());
+    ctx.set_visuals_of(egui::Theme::Light, visuals);
 
     ctx.all_styles_mut(|style| {
         style.spacing.item_spacing = egui::vec2(8.0, 6.0);
