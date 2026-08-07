@@ -165,8 +165,25 @@ withholding), `geo` (ipinfo.io with a private-address guard), `event`, and
 `cargo run -p scanner-core --example replay -- <log>`, which runs the whole
 pipeline headlessly.
 
-**M4 — UI shell.** eframe, frameless always-on-top viewport, custom title bar,
-opacity/scale, room detail rendering. First runnable app.
+**M4 — UI shell. ✅ done.** eframe 0.36, frameless always-on-top viewport, custom
+title bar with painted icons, opacity/scale, room detail, run history, console,
+status bar, first-run settings. Verified by running against the captured log and
+the live API under a virtual display.
+
+Two things worth remembering from building it:
+
+- **Icons are painted, not typed.** egui bundles its own fonts and symbols
+  outside the common blocks are not in them — U+25CF (status dot) and U+2715
+  (close cross) both rendered as tofu boxes. egui paints its own window close
+  button with line segments for exactly this reason, so we do the same. The
+  upside of the bundled fonts is that text is identical on all three platforms
+  with no work, where v1 hardcoded Windows-only font names in ~20 places.
+- **Translucency needs a compositor.** The overlay paints its own alpha rather
+  than asking the OS for window opacity, which is the portable choice — but on
+  X11 with no compositing WM the alpha renders as solid black, and the settings
+  panel is invisible too, so the user cannot recover. `SCANNER_OPAQUE=1` forces
+  an opaque window, and `effective_opacity()` ignores the opacity setting when
+  the window has no alpha channel.
 
 **M5 — images.** Async fetch, decode, carousel with keyboard nav and auto-rotate,
 bounded LRU cache (v1's cache was unbounded — `sync_window.py:609`).
