@@ -245,19 +245,30 @@ Two things worth remembering from building it:
   `AppState::apply`, since only the app crate is allowed to touch
   `egui::Context::load_texture`. `AppState` keeps an exhaustive match arm for
   both variants that does nothing, so a future event can't be silently missed.
-- **One shared download queue starves the room actually on screen.** Requesting
-  every image of every resolved room through one bounded semaphore is FIFO: a
-  session that resolves many rooms in a burst (verified by replaying a full
-  41-room log, which reads and processes the entire file about as fast as the
-  API rate limiter allows rather than at the original session's real pacing)
-  leaves the *current* room's own images queued behind ~150+ images from rooms
-  already left behind — confirmed live, a spinner still showing after 90+
-  seconds. Fixed with a second, small, dedicated semaphore reserved for exactly
-  one image per room (`MAX_CONCURRENT_PRIORITY_DOWNLOADS`), so something
-  usually appears for the room on screen within a couple of downloads' worth of
-  latency regardless of how backlogged the rest of the queue is. Confirmed live
-  against a small two-room log: the first image renders in the carousel within
-  ~11 seconds of a fresh scan starting, watermark and all.
+- **Don't request images for a room the player has already left.** The first
+  version of this requested every resolved room's images unconditionally, so a
+  session that resolves many rooms in a burst (replaying a full 41-room log
+  reads and processes the entire file about as fast as the API rate limiter
+  allows, not at the original session's real pacing) left the *current* room's
+  own images queued behind ~150+ images for rooms already superseded —
+  confirmed live, a spinner still showing after 90+ seconds. The direct fix is
+  [`fetch_images_for`](../crates/core/src/engine.rs): for a batch of parsed log
+  events, only the *last* `RoomEntered` is worth fetching images for, since
+  anything earlier in the same batch is already superseded by the time that
+  batch finishes processing — the room never reached the screen, so its
+  pictures were never going to be seen. A pure function, tested without a
+  `Scanner` or the network. In ordinary live play this changes nothing (a
+  poll every 500 ms against someone walking normally almost always finds at
+  most one new room), so it only ever activates on a backlog. Re-ran the exact
+  41-room burst that previously left a 90-second spinner: the current room's
+  image is now fully loaded and rendering by 55 seconds — because the ~40
+  superseded rooms' images are simply never requested, not merely
+  deprioritized. A second, small dedicated semaphore for exactly one image per
+  room (`MAX_CONCURRENT_PRIORITY_DOWNLOADS`) stays on as defence-in-depth for
+  what the batch fix alone doesn't cover — consecutive batches can each still
+  contribute one "current" room, so more than one room's images can
+  legitimately be in flight when catching up a backlog spanning more than one
+  poll.
 
 **Known issue, not fixed here — out of scope for images specifically:** a room's
 `contributor.display_name` is a free-form Discord display name and can contain

@@ -25,6 +25,29 @@ use crate::logsrc::finder::{self, LogSource};
 use crate::logsrc::tailer::Tailer;
 use crate::logsrc::{LogEvent, Parser, ResumePoint};
 
+/// Decide, for a batch of parsed log events, which `RoomEntered` events are
+/// worth fetching images for: only the last one, since anything earlier is
+/// already superseded by the time this batch finishes processing — the player
+/// has moved on before the room ever reaches the screen, so downloading its
+/// pictures only spends bandwidth that delays the room actually on screen.
+///
+/// A pure function so this is testable without a `Scanner`, an `ApiClient`, or
+/// the network at all. In ordinary live play a batch almost always contains at
+/// most one new room (a poll every 500 ms against someone walking at normal
+/// speed), so this changes nothing there; it only matters when catching up a
+/// backlog — resuming a log the scanner was not tailing live, or replaying one
+/// wholesale, both of which can put many room entries in a single batch.
+fn fetch_images_for(log_events: &[LogEvent]) -> Vec<bool> {
+    let last_room_index = log_events
+        .iter()
+        .rposition(|e| matches!(e, LogEvent::RoomEntered { .. }));
+    log_events
+        .iter()
+        .enumerate()
+        .map(|(i, e)| matches!(e, LogEvent::RoomEntered { .. }) && Some(i) == last_room_index)
+        .collect()
+}
+
 /// How often to read the log when no filesystem event has arrived.
 ///
 /// A watcher alone is not enough: some writers append without updating metadata
@@ -48,17 +71,18 @@ const MAX_CONCURRENT_IMAGE_DOWNLOADS: usize = 4;
 
 /// A separate, small pool reserved for the *first* image of a room.
 ///
-/// A room's remaining images all share one FIFO-ish bulk queue, so a player
-/// who moves through many rooms quickly can leave a long tail of pictures
-/// queued for rooms already behind them — measured during a full-log replay,
-/// the currently displayed room's own image still hadn't reached the front of
-/// a ~200-image bulk queue after 90 seconds. That is not a deadlock, just
-/// starvation: the queue is FIFO and strictly older requests always win.
-///
-/// Routing exactly one image per room through this separate, otherwise-idle
-/// pool means the room actually on screen almost always has *something* to
-/// show shortly after it resolves, even while the bulk queue behind it is
-/// still working through a large backlog.
+/// [`fetch_images_for`] is the primary fix for image requests piling up
+/// behind rooms the player has already left — it stops those requests from
+/// ever being made. This is the secondary, defence-in-depth layer for what it
+/// does not cover: consecutive batches can each still contribute one "last
+/// room", so more than one room's images can legitimately be in flight at
+/// once (e.g. catching up a backlog spanning more than one 500 ms poll). A
+/// room's second image onward shares one FIFO-ish bulk queue with every other
+/// room's, so without this, an earlier room's queued images can still delay
+/// the room actually on screen. Routing exactly one image per room through
+/// this separate, otherwise-idle pool means the room on screen almost always
+/// has *something* to show shortly after it resolves, regardless of what the
+/// bulk queue behind it is still working through.
 const MAX_CONCURRENT_PRIORITY_DOWNLOADS: usize = 2;
 
 pub struct Scanner {
@@ -106,7 +130,10 @@ impl Scanner {
             self.on_server_address(ip.clone()).await;
         }
         if let Some(room) = &point.current_room {
-            self.on_room(room.clone()).await;
+            // The one room a resume point ever names is by definition the
+            // room the player is standing in right now, so it always wants
+            // its images.
+            self.on_room(room.clone(), true).await;
         }
     }
 
@@ -125,15 +152,18 @@ impl Scanner {
         }
 
         let consumed = batch.lines.len();
-        for log_event in self.parser.parse_lines(&batch.lines) {
-            self.handle(log_event).await;
+        let log_events = self.parser.parse_lines(&batch.lines);
+        let wants_images = fetch_images_for(&log_events);
+
+        for (event, fetch_images) in log_events.into_iter().zip(wants_images) {
+            self.handle(event, fetch_images).await;
         }
         Ok(consumed)
     }
 
-    async fn handle(&mut self, event: LogEvent) {
+    async fn handle(&mut self, event: LogEvent, fetch_images: bool) {
         match event {
-            LogEvent::RoomEntered { name } => self.on_room(name).await,
+            LogEvent::RoomEntered { name } => self.on_room(name, fetch_images).await,
             LogEvent::ServerAddress { ip } => self.on_server_address(ip).await,
             LogEvent::Disconnected => {
                 // Not a run boundary: this also fires on the lobby teleport.
@@ -145,7 +175,11 @@ impl Scanner {
         }
     }
 
-    async fn on_room(&mut self, name: String) {
+    /// `fetch_images` is false for a room known to already be superseded by a
+    /// later one in the same batch — see [`fetch_images_for`]. The room is
+    /// still resolved and recorded in history either way; only its pictures
+    /// are skipped, since nothing will ever display them.
+    async fn on_room(&mut self, name: String, fetch_images: bool) {
         if self.last_room.as_deref() == Some(name.as_str()) {
             self.emit(Event::debug(format!("still in {name}; skipping")));
             return;
@@ -165,7 +199,9 @@ impl Scanner {
         match self.client.resolve_room(&name).await {
             Ok(Some(room)) => {
                 self.emit(Event::log(format!("Entered {}", room.case_name)));
-                self.request_images(&room);
+                if fetch_images {
+                    self.request_images(&room);
+                }
                 self.emit(Event::RoomResolved {
                     name,
                     room: Box::new(Some(room)),
@@ -575,6 +611,58 @@ mod tests {
             scanner.should_request_image("http://example/b.webp"),
             "a different url is unaffected by the first"
         );
+    }
+
+    fn entered(name: &str) -> LogEvent {
+        LogEvent::RoomEntered { name: name.into() }
+    }
+
+    #[test]
+    fn only_the_last_room_in_a_batch_wants_images() {
+        let events = vec![
+            entered("A"),
+            LogEvent::ServerAddress {
+                ip: "1.2.3.4".into(),
+            },
+            entered("B"),
+            entered("C"),
+        ];
+        assert_eq!(
+            fetch_images_for(&events),
+            vec![false, false, false, true],
+            "A and B are superseded before this batch finishes; only C is ever seen"
+        );
+    }
+
+    #[test]
+    fn a_single_room_batch_wants_its_images() {
+        // The overwhelmingly common case in live play: one new room per poll.
+        assert_eq!(fetch_images_for(&[entered("A")]), vec![true]);
+    }
+
+    #[test]
+    fn a_batch_with_no_rooms_wants_nothing() {
+        let events = vec![
+            LogEvent::ServerAddress {
+                ip: "1.2.3.4".into(),
+            },
+            LogEvent::Disconnected,
+        ];
+        assert_eq!(fetch_images_for(&events), vec![false, false]);
+    }
+
+    #[test]
+    fn revisiting_the_same_room_within_a_batch_still_only_wants_the_last_occurrence() {
+        // A back-and-forth (A, B, A) must not be mistaken for "A already
+        // requested" and skipped — the batch's actual last event is what
+        // matters, not whether the name repeats.
+        let events = vec![entered("A"), entered("B"), entered("A")];
+        assert_eq!(fetch_images_for(&events), vec![false, false, true]);
+    }
+
+    #[test]
+    fn an_empty_batch_wants_nothing() {
+        assert_eq!(fetch_images_for(&[]), Vec::<bool>::new());
     }
 
     #[tokio::test]
