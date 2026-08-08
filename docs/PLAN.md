@@ -184,6 +184,48 @@ Two things worth remembering from building it:
   panel is invisible too, so the user cannot recover. `SCANNER_OPAQUE=1` forces
   an opaque window, and `effective_opacity()` ignores the opacity setting when
   the window has no alpha channel.
+- **`Context::set_visuals` writes to whichever theme is active when it is
+  called**, not to a fixed palette. Calling it at startup — before Windows has
+  reported its system theme — landed the palette on the wrong `Theme` variant
+  once the OS's actual preference came through, so the app rendered in egui's
+  unconfigured stock theme on Windows despite looking correct in every local
+  (Linux, no reported system theme) test. Fixed by pinning
+  `ThemePreference::Dark` explicitly and writing the palette into both `Theme`
+  variants, so nothing can select an unconfigured one.
+- **Windows transparent windows carry a hidden opaque layer underneath wgpu's
+  swapchain.** winit implements `with_transparent` on Windows via
+  `DwmEnableBlurBehindWindow` rather than `WS_EX_NOREDIRECTIONBITMAP`, which
+  leaves the window's GDI redirection surface — a system-managed backing bitmap
+  — in DWM's composition stack *underneath* the swapchain. Windows fills that
+  surface opaque white on first show, and since the app draws exclusively
+  through the swapchain, nothing ever repaints it: the translucent content
+  composites correctly over solid white instead of the desktop. A live resize
+  makes this look like a completely different bug — DWM carries the surface's
+  stale content forward through the resize, truncating it on shrink and
+  zero-filling new area on grow (zero = transparent black), so post-resize the
+  window is correctly transparent *except* a solid rectangle exactly the size
+  of the window at its smallest, which looked at first like a swapchain/surface
+  bug rather than a leftover fill underneath it.
+
+  This was invisible from Linux entirely — no virtual display here has DWM, so
+  every earlier attempt (repainting per-panel alpha differently, switching to
+  glow, chasing wgpu's `CompositeAlphaMode` selection) was reasoning from
+  screenshots without being able to reproduce the failure. `crates/app/src/bin/repro.rs`
+  is a bare eframe window with none of the app's code, used to confirm the bug
+  was upstream rather than in the scanner before spending more effort on it —
+  it also has a `--raw` flag to show the artifact undisguised. The eventual fix,
+  in `redirection_surface.rs`: GDI draws land in that same redirection surface,
+  and `PatBlt` with the `BLACKNESS` raster op writes all four bytes to zero —
+  premultiplied transparent black — over it. Doing that at startup and after
+  resize/scale/restore events (a short burst of frames, since the system's
+  white fill can land asynchronously after the triggering event) keeps the
+  surface transparent for good, since DWM's later copies of it stay zero. The
+  window is also created hidden and shown only once the renderer is
+  initialized, so the white startup fill is never on screen at all.
+
+  `WS_EX_NOREDIRECTIONBITMAP` would remove the redirection surface outright and
+  is the root-cause fix, but it can only be set at window-creation time and
+  egui-winit 0.36 has no way to pass extended window styles through.
 
 **M5 — images.** Async fetch, decode, carousel with keyboard nav and auto-rotate,
 bounded LRU cache (v1's cache was unbounded — `sync_window.py:609`).
