@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use crate::api::Room;
 use crate::geo::Location;
+use crate::images::DecodedImage;
 
 /// What the scanner is currently doing. The UI renders this directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +63,20 @@ pub enum Event {
 
     /// A failure worth showing. Recoverable — the scanner keeps running.
     Warning(String),
+
+    /// A room image finished downloading and decoding. The app must confirm
+    /// the URL still belongs to the room on screen before creating a texture
+    /// from it — the player may already have moved on.
+    ImageReady {
+        url: String,
+        image: Box<DecodedImage>,
+    },
+
+    /// An image failed to download or decode. Deliberately not a `Warning`:
+    /// one broken image in a gallery is not worth interrupting the user over.
+    ImageFailed {
+        url: String,
+    },
 }
 
 impl Event {

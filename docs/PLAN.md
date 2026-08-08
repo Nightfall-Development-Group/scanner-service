@@ -227,8 +227,47 @@ Two things worth remembering from building it:
   is the root-cause fix, but it can only be set at window-creation time and
   egui-winit 0.36 has no way to pass extended window styles through.
 
-**M5 — images.** Async fetch, decode, carousel with keyboard nav and auto-rotate,
-bounded LRU cache (v1's cache was unbounded — `sync_window.py:609`).
+**M5 — images. ✅ done.** `core::images` (pure-Rust decode via `image` with only
+`png`/`jpeg`/`webp` enabled — no libwebp, keeps the small-binary/easy-cross-compile
+story) downloads and decodes off the GUI thread; `app::textures::TextureCache` is
+a bounded LRU of `egui::TextureHandle` (v1's equivalent cache was unbounded —
+`sync_window.py:609`). Carousel has prev/next buttons, a position counter,
+caption, `,`/`.` and arrow-key navigation (suppressed while a text field has
+focus), and auto-rotate on a per-room timer. Verified live against the real log
+and API under Xvfb, including a real decoded image rendering in the carousel.
+
+Two things worth remembering from building it:
+
+- **Texture creation must happen on the thread that owns the `egui::Context`.**
+  `DecodedImage` (raw RGBA bytes) is a `core` type with no GUI dependency, sent
+  over the existing `Event` channel like everything else; the app intercepts
+  `Event::ImageReady`/`ImageFailed` in `drain_events` *before* they reach
+  `AppState::apply`, since only the app crate is allowed to touch
+  `egui::Context::load_texture`. `AppState` keeps an exhaustive match arm for
+  both variants that does nothing, so a future event can't be silently missed.
+- **One shared download queue starves the room actually on screen.** Requesting
+  every image of every resolved room through one bounded semaphore is FIFO: a
+  session that resolves many rooms in a burst (verified by replaying a full
+  41-room log, which reads and processes the entire file about as fast as the
+  API rate limiter allows rather than at the original session's real pacing)
+  leaves the *current* room's own images queued behind ~150+ images from rooms
+  already left behind — confirmed live, a spinner still showing after 90+
+  seconds. Fixed with a second, small, dedicated semaphore reserved for exactly
+  one image per room (`MAX_CONCURRENT_PRIORITY_DOWNLOADS`), so something
+  usually appears for the room on screen within a couple of downloads' worth of
+  latency regardless of how backlogged the rest of the queue is. Confirmed live
+  against a small two-room log: the first image renders in the carousel within
+  ~11 seconds of a fresh scan starting, watermark and all.
+
+**Known issue, not fixed here — out of scope for images specifically:** a room's
+`contributor.display_name` is a free-form Discord display name and can contain
+any Unicode script (confirmed live: a real contributor's name is `仁`). egui's
+bundled fonts only cover a Latin/Western subset, so any such name renders as a
+tofu box next to "documented by" — the same class of problem as the M4 title-bar
+icons, but unlike a fixed icon, arbitrary user text can't be hand-painted; the
+real fix is bundling a broader fallback font (e.g. Noto Sans CJK), which is a
+binary-size trade-off (tens of MB) deserving its own decision rather than a
+silent fix mid-carousel.
 
 **M6 — polish.** Debug console as a second viewport, geolocation, first-run API key
 entry, settings.

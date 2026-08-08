@@ -13,6 +13,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::redirection_surface;
 use crate::state::AppState;
+use crate::textures::TextureCache;
 use crate::{theme, ui};
 
 /// Settings are saved this long after the last change rather than on every one.
@@ -42,6 +43,10 @@ pub struct ScannerApp {
     /// Keeps the Windows redirection surface transparent; see that module's
     /// docs for why a white backdrop appears behind the window without it.
     redirection: redirection_surface::Cleaner,
+    /// Decoded room images, uploaded to the GPU. Lives here rather than in
+    /// `AppState` because a texture only means something in the context of an
+    /// `egui::Context`, which `AppState` deliberately never holds.
+    pub images: TextureCache,
 }
 
 /// Purely presentational state: which panels are open, in-progress text entry.
@@ -102,6 +107,7 @@ impl ScannerApp {
             config_error,
             transparent,
             redirection: redirection_surface::Cleaner::new(cc, transparent),
+            images: TextureCache::default(),
         };
 
         app.apply_window_settings(&cc.egui_ctx);
@@ -163,14 +169,49 @@ impl ScannerApp {
     }
 
     /// Move queued events into state. Called once per frame.
-    fn drain_events(&mut self) {
+    ///
+    /// `Event::ImageReady`/`ImageFailed` are intercepted here rather than
+    /// passed to `AppState::apply`: creating a texture needs `egui::Context`,
+    /// which `AppState` deliberately never holds, so this is the one place
+    /// that boundary is crossed.
+    fn drain_events(&mut self, ctx: &egui::Context) {
         let drained: Vec<Event> = match self.events.lock() {
             Ok(mut q) => q.drain(..).collect(),
             Err(_) => return,
         };
         for event in drained {
-            self.state.apply(event);
+            match event {
+                Event::ImageReady { url, image } => self.images.insert(ctx, url, *image),
+                Event::ImageFailed { url } => self.images.mark_failed(url),
+                other => self.state.apply(other),
+            }
         }
+    }
+
+    /// Step the carousel forward. Also resets the auto-rotate clock, so a
+    /// manual click is never immediately followed by an automatic one.
+    pub fn advance_image(&mut self) {
+        self.state.next_image(Instant::now());
+    }
+
+    /// Step the carousel backward.
+    pub fn retreat_image(&mut self) {
+        self.state.prev_image(Instant::now());
+    }
+
+    /// Advance the carousel automatically, if enabled and due.
+    ///
+    /// Runs every pass rather than on a separate timer thread: the app is
+    /// already re-entered by eframe on repaint requests, so scheduling the
+    /// next check with `request_repaint_after` is enough, with no dedicated
+    /// task to spawn or shut down.
+    fn tick_image_rotation(&mut self, ctx: &egui::Context) {
+        if !self.config.images.auto_rotate {
+            return;
+        }
+        let interval = Duration::from_secs_f32(self.config.images.rotate_interval_secs.max(1.0));
+        self.state.maybe_auto_rotate(Instant::now(), interval);
+        ctx.request_repaint_after(interval);
     }
 
     /// Note that settings changed; the write happens once they settle.
@@ -272,8 +313,9 @@ impl eframe::App for ScannerApp {
     /// when nothing is being painted, rather than piling up in the queue.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.redirection.tick(ctx);
-        self.drain_events();
+        self.drain_events(ctx);
         self.save_if_settled();
+        self.tick_image_rotation(ctx);
 
         // A pending save needs a later pass to actually happen.
         if self.dirty_since.is_some() {

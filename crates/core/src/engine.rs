@@ -9,15 +9,18 @@
 //! pipeline deterministically against a temp file, with no sleeping and no
 //! filesystem events.
 
+use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{mpsc, watch, Semaphore};
 
-use crate::api::{ApiClient, ApiError};
+use crate::api::cache::TtlCache;
+use crate::api::{ApiClient, ApiError, Room};
 use crate::event::{Event, Status};
 use crate::geo;
+use crate::images;
 use crate::logsrc::finder::{self, LogSource};
 use crate::logsrc::tailer::Tailer;
 use crate::logsrc::{LogEvent, Parser, ResumePoint};
@@ -33,6 +36,31 @@ const POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// How often to check whether the client rotated to a newer log file.
 const ROTATION_CHECK: Duration = Duration::from_secs(5);
 
+/// How long to remember that an image URL was already requested, so
+/// re-entering the same room shortly after does not redownload its images.
+/// Well above the length of a typical run; a room's images do not change
+/// while someone is standing in it.
+const IMAGE_REQUEST_TTL: Duration = Duration::from_secs(1800);
+
+/// Bulk-lane concurrent image downloads across the whole scan, not per room —
+/// entering several new rooms in quick succession must not multiply this.
+const MAX_CONCURRENT_IMAGE_DOWNLOADS: usize = 4;
+
+/// A separate, small pool reserved for the *first* image of a room.
+///
+/// A room's remaining images all share one FIFO-ish bulk queue, so a player
+/// who moves through many rooms quickly can leave a long tail of pictures
+/// queued for rooms already behind them — measured during a full-log replay,
+/// the currently displayed room's own image still hadn't reached the front of
+/// a ~200-image bulk queue after 90 seconds. That is not a deadlock, just
+/// starvation: the queue is FIFO and strictly older requests always win.
+///
+/// Routing exactly one image per room through this separate, otherwise-idle
+/// pool means the room actually on screen almost always has *something* to
+/// show shortly after it resolves, even while the bulk queue behind it is
+/// still working through a large backlog.
+const MAX_CONCURRENT_PRIORITY_DOWNLOADS: usize = 2;
+
 pub struct Scanner {
     client: Arc<ApiClient>,
     events: mpsc::UnboundedSender<Event>,
@@ -42,6 +70,12 @@ pub struct Scanner {
     last_room: Option<String>,
     /// Most recent server address, so we geolocate a given address once.
     located_ip: Option<String>,
+    /// Image URLs already handed to a download task recently.
+    requested_images: TtlCache<String, ()>,
+    /// Bounds concurrent downloads for a room's second image onward.
+    bulk_image_semaphore: Arc<Semaphore>,
+    /// Bounds concurrent downloads of just the first image of each room.
+    priority_image_semaphore: Arc<Semaphore>,
 }
 
 impl Scanner {
@@ -52,6 +86,12 @@ impl Scanner {
             parser: Parser::new(),
             last_room: None,
             located_ip: None,
+            requested_images: TtlCache::new(
+                NonZeroUsize::new(256).expect("nonzero"),
+                IMAGE_REQUEST_TTL,
+            ),
+            bulk_image_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_IMAGE_DOWNLOADS)),
+            priority_image_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_PRIORITY_DOWNLOADS)),
         }
     }
 
@@ -125,6 +165,7 @@ impl Scanner {
         match self.client.resolve_room(&name).await {
             Ok(Some(room)) => {
                 self.emit(Event::log(format!("Entered {}", room.case_name)));
+                self.request_images(&room);
                 self.emit(Event::RoomResolved {
                     name,
                     room: Box::new(Some(room)),
@@ -170,6 +211,57 @@ impl Scanner {
             ip,
             location: Box::new(location),
         });
+    }
+
+    /// Kick off background downloads for any of `room`'s images not already
+    /// requested recently. One task per image rather than all-or-nothing, so a
+    /// room half-cached from an earlier visit only fetches what is missing.
+    ///
+    /// The first image goes through the priority lane, the rest through bulk —
+    /// see [`MAX_CONCURRENT_PRIORITY_DOWNLOADS`] for why that split exists.
+    fn request_images(&mut self, room: &Room) {
+        for (position, image) in room.ordered_images().into_iter().enumerate() {
+            if !self.should_request_image(&image.image_url) {
+                continue;
+            }
+            let url = image.image_url.clone();
+            let events = self.events.clone();
+            let permit = if position == 0 {
+                Arc::clone(&self.priority_image_semaphore)
+            } else {
+                Arc::clone(&self.bulk_image_semaphore)
+            };
+            tokio::spawn(async move {
+                // Held until this task ends, so the semaphore genuinely bounds
+                // how many downloads are in flight rather than just how many
+                // start per instant.
+                let _permit = permit.acquire_owned().await;
+                match images::fetch_and_decode(&url).await {
+                    Ok(decoded) => {
+                        let _ = events.send(Event::ImageReady {
+                            url,
+                            image: Box::new(decoded),
+                        });
+                    }
+                    Err(e) => {
+                        let _ = events.send(Event::debug(format!("image failed: {url}: {e}")));
+                        let _ = events.send(Event::ImageFailed { url });
+                    }
+                }
+            });
+        }
+    }
+
+    /// Whether `url` should be fetched now. Split out from [`request_images`]
+    /// so the dedupe logic is unit-testable without a network call.
+    fn should_request_image(&mut self, url: &str) -> bool {
+        let now = Instant::now();
+        if self.requested_images.get(&url.to_string(), now).is_some() {
+            false
+        } else {
+            self.requested_images.put(url.to_string(), (), now);
+            true
+        }
     }
 
     /// Forget per-run state. Called on a new run and on log truncation.
@@ -468,6 +560,21 @@ mod tests {
 
         let mut tailer = Tailer::at_offset(&path, 0);
         scanner.pump(&mut tailer).await.expect("pump survives");
+    }
+
+    #[tokio::test]
+    async fn image_requests_are_deduped_but_not_permanently_suppressed() {
+        let (mut scanner, _rx) = offline_scanner();
+
+        assert!(scanner.should_request_image("http://example/a.webp"));
+        assert!(
+            !scanner.should_request_image("http://example/a.webp"),
+            "a second ask for the same url within the TTL is suppressed"
+        );
+        assert!(
+            scanner.should_request_image("http://example/b.webp"),
+            "a different url is unaffected by the first"
+        );
     }
 
     #[tokio::test]

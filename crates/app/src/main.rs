@@ -10,6 +10,7 @@
 mod app;
 mod redirection_surface;
 mod state;
+mod textures;
 mod theme;
 mod ui;
 

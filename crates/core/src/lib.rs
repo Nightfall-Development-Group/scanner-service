@@ -9,6 +9,7 @@ pub mod config;
 pub mod engine;
 pub mod event;
 pub mod geo;
+pub mod images;
 pub mod logsrc;
 pub mod tls;
 
@@ -16,4 +17,5 @@ pub use api::{ApiClient, ApiError, Room};
 pub use config::Config;
 pub use engine::Scanner;
 pub use event::{Event, Status};
+pub use images::{DecodedImage, ImageError};
 pub use logsrc::{LogEvent, Parser, Tailer};

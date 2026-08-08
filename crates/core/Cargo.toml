@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 directories = "6.0.0"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
 lru = "0.18.2"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "gzip", "rustls-no-provider"] }
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }

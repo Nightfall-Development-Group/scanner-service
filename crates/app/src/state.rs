@@ -7,8 +7,9 @@
 //! and mutated from worker threads.
 
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
-use scanner_core::api::Room;
+use scanner_core::api::{Room, RoomImage};
 use scanner_core::event::{Event, Status};
 use scanner_core::geo::Location;
 
@@ -72,6 +73,12 @@ pub struct AppState {
     pub warning: Option<String>,
     /// File currently being followed, for the status bar.
     pub watching: Option<String>,
+    /// Which of `current`'s images the carousel is showing.
+    pub current_image_index: usize,
+    /// When the carousel last changed image, manually or automatically. `None`
+    /// right after entering a room, so auto-rotate waits a full interval from
+    /// now rather than from whenever the previous room happened to rotate.
+    last_image_rotate: Option<Instant>,
 }
 
 impl Default for AppState {
@@ -85,6 +92,8 @@ impl Default for AppState {
             debug: VecDeque::new(),
             warning: None,
             watching: None,
+            current_image_index: 0,
+            last_image_rotate: None,
         }
     }
 }
@@ -112,6 +121,8 @@ impl AppState {
             Event::RoomEntered { name } => {
                 // Show the name immediately; the record fills in when it lands.
                 self.current = Some(RoomEntry { name, room: None });
+                self.current_image_index = 0;
+                self.last_image_rotate = None;
             }
 
             Event::RoomResolved { name, room } => {
@@ -147,6 +158,12 @@ impl AppState {
                 push_capped(&mut self.debug, format!("warning: {w}"), MAX_DEBUG_LINES);
                 self.warning = Some(w);
             }
+
+            // Handled by ScannerApp directly, which owns the GPU texture
+            // cache and so must run `ctx.load_texture` itself — these never
+            // reach here in the running app, but the match must stay
+            // exhaustive so a future event variant cannot be silently missed.
+            Event::ImageReady { .. } | Event::ImageFailed { .. } => {}
         }
     }
 
@@ -157,6 +174,80 @@ impl AppState {
 
     pub fn is_scanning(&self) -> bool {
         matches!(self.status, Status::Watching | Status::Searching)
+    }
+
+    /// How many images the room on screen has, ordered for display.
+    fn ordered_images(&self) -> Vec<&RoomImage> {
+        self.current
+            .as_ref()
+            .and_then(|c| c.room.as_ref())
+            .map(Room::ordered_images)
+            .unwrap_or_default()
+    }
+
+    pub fn image_count(&self) -> usize {
+        self.ordered_images().len()
+    }
+
+    /// The image the carousel should be showing right now, if any.
+    pub fn current_image(&self) -> Option<&RoomImage> {
+        let images = self.ordered_images();
+        if images.is_empty() {
+            return None;
+        }
+        // Defensive clamp: normally kept in range by `next_image`/`prev_image`,
+        // but a room re-resolving with fewer images than before must not index
+        // out of bounds.
+        let index = self.current_image_index.min(images.len() - 1);
+        images.into_iter().nth(index)
+    }
+
+    /// Step the carousel forward, wrapping. A no-op with zero or one image.
+    pub fn next_image(&mut self, now: Instant) {
+        let n = self.image_count();
+        if n == 0 {
+            return;
+        }
+        self.current_image_index = (self.current_image_index + 1) % n;
+        self.last_image_rotate = Some(now);
+    }
+
+    /// Step the carousel backward, wrapping.
+    pub fn prev_image(&mut self, now: Instant) {
+        let n = self.image_count();
+        if n == 0 {
+            return;
+        }
+        self.current_image_index = (self.current_image_index + n - 1) % n;
+        self.last_image_rotate = Some(now);
+    }
+
+    /// Advance to the next image if `interval` has elapsed since the carousel
+    /// last changed — manually or automatically — and there is more than one
+    /// image to rotate through. Returns whether it rotated, so tests (and, in
+    /// principle, callers) can observe it without inspecting private state.
+    ///
+    /// `now` is a parameter rather than read from the clock internally so this
+    /// is testable without sleeping — the same pattern used for the API
+    /// client's rate limiter.
+    pub fn maybe_auto_rotate(&mut self, now: Instant, interval: Duration) -> bool {
+        if self.image_count() <= 1 {
+            return false;
+        }
+        match self.last_image_rotate {
+            // No baseline yet (just entered this room): start the clock now
+            // rather than rotating immediately, so a freshly entered room
+            // shows its first image for a full interval like every other one.
+            None => {
+                self.last_image_rotate = Some(now);
+                false
+            }
+            Some(last) if now.duration_since(last) >= interval => {
+                self.next_image(now);
+                true
+            }
+            Some(_) => false,
+        }
     }
 }
 
@@ -272,5 +363,153 @@ mod tests {
         let mut s = AppState::default();
         s.apply(Event::WatchingFile("/long/path/to/player.log".into()));
         assert_eq!(s.watching.as_deref(), Some("player.log"));
+    }
+
+    fn image(position: i32) -> RoomImage {
+        RoomImage {
+            id: position as i64,
+            image_url: format!("https://cdn.example/{position}.webp"),
+            object_key: format!("room/{position}.webp"),
+            position,
+            caption: None,
+            is_primary: position == 0,
+            uploaded_by: None,
+            uploaded_at: "2026-01-01T00:00:00Z".into(),
+        }
+    }
+
+    fn room_with_images(n: i32) -> Room {
+        Room {
+            room_name: "r".into(),
+            case_name: "R".into(),
+            slug: "r".into(),
+            description: String::new(),
+            roomtype: "Unclassified".into(),
+            documented_by: None,
+            last_edited_by: None,
+            documented_at: "2026-01-01T00:00:00Z".into(),
+            last_edited_at: "2026-01-01T00:00:00Z".into(),
+            version: 1,
+            edit_reason: None,
+            soft_deleted: false,
+            scan_state: None,
+            images: (0..n).map(image).collect(),
+            tags: Vec::new(),
+            contributor: None,
+            attributes: None,
+        }
+    }
+
+    fn with_images(n: i32) -> AppState {
+        let mut s = AppState::default();
+        s.apply(Event::RoomEntered { name: "r".into() });
+        s.apply(Event::RoomResolved {
+            name: "r".into(),
+            room: Box::new(Some(room_with_images(n))),
+        });
+        s
+    }
+
+    #[test]
+    fn no_current_room_has_no_images() {
+        let s = AppState::default();
+        assert_eq!(s.image_count(), 0);
+        assert!(s.current_image().is_none());
+    }
+
+    #[test]
+    fn next_and_prev_wrap_around() {
+        let mut s = with_images(3);
+        let now = Instant::now();
+
+        assert_eq!(s.current_image().unwrap().position, 0);
+        s.next_image(now);
+        assert_eq!(s.current_image().unwrap().position, 1);
+        s.next_image(now);
+        s.next_image(now);
+        assert_eq!(s.current_image().unwrap().position, 0, "wraps forward");
+
+        s.prev_image(now);
+        assert_eq!(s.current_image().unwrap().position, 2, "wraps backward");
+    }
+
+    #[test]
+    fn a_single_image_does_not_move() {
+        let mut s = with_images(1);
+        s.next_image(Instant::now());
+        assert_eq!(s.current_image_index, 0);
+    }
+
+    #[test]
+    fn zero_images_do_not_panic_on_navigation() {
+        let mut s = with_images(0);
+        s.next_image(Instant::now());
+        s.prev_image(Instant::now());
+        assert!(s.current_image().is_none());
+    }
+
+    #[test]
+    fn entering_a_new_room_resets_the_carousel() {
+        let mut s = with_images(3);
+        s.next_image(Instant::now());
+        assert_eq!(s.current_image_index, 1);
+
+        s.apply(Event::RoomEntered {
+            name: "other".into(),
+        });
+        assert_eq!(s.current_image_index, 0, "index resets for the new room");
+    }
+
+    #[test]
+    fn auto_rotate_waits_for_the_interval() {
+        let mut s = with_images(3);
+        let t0 = Instant::now();
+        let interval = Duration::from_secs(5);
+
+        assert!(
+            !s.maybe_auto_rotate(t0, interval),
+            "nothing has elapsed yet"
+        );
+        assert_eq!(s.current_image_index, 0);
+
+        let rotated = s.maybe_auto_rotate(t0 + interval, interval);
+        assert!(rotated);
+        assert_eq!(s.current_image_index, 1);
+    }
+
+    #[test]
+    fn auto_rotate_does_nothing_with_one_or_no_images() {
+        let mut s = with_images(1);
+        let t0 = Instant::now();
+        assert!(!s.maybe_auto_rotate(t0 + Duration::from_secs(999), Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn manual_navigation_resets_the_auto_rotate_clock() {
+        // Otherwise a manual click right before the auto-rotate is due would
+        // immediately be followed by an automatic one, jumping twice at once.
+        let mut s = with_images(3);
+        let t0 = Instant::now();
+        let interval = Duration::from_secs(5);
+
+        s.next_image(t0);
+        assert!(
+            !s.maybe_auto_rotate(t0 + Duration::from_millis(1), interval),
+            "the manual step just reset the clock"
+        );
+    }
+
+    #[test]
+    fn an_index_beyond_the_image_count_clamps_instead_of_panicking() {
+        // `current_image_index` is public so the UI can read it for a counter
+        // like "3 / 6"; being public also means it can be set out of range by
+        // mistake, and `current_image` must not panic if that happens.
+        let mut s = with_images(3);
+        s.current_image_index = 999;
+        assert_eq!(
+            s.current_image().unwrap().position,
+            2,
+            "clamped to the last image"
+        );
     }
 }
