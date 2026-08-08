@@ -11,6 +11,7 @@ use scanner_core::engine;
 use scanner_core::event::{Event, Status};
 use tokio::sync::{mpsc, watch};
 
+use crate::redirection_surface;
 use crate::state::AppState;
 use crate::{theme, ui};
 
@@ -38,6 +39,9 @@ pub struct ScannerApp {
     /// surfaces are painted fully opaque regardless of the opacity setting,
     /// because alpha against a non-composited window reads as black.
     transparent: bool,
+    /// Keeps the Windows redirection surface transparent; see that module's
+    /// docs for why a white backdrop appears behind the window without it.
+    redirection: redirection_surface::Cleaner,
 }
 
 /// Purely presentational state: which panels are open, in-progress text entry.
@@ -97,12 +101,20 @@ impl ScannerApp {
             dirty_since: None,
             config_error,
             transparent,
+            redirection: redirection_surface::Cleaner::new(cc, transparent),
         };
 
         app.apply_window_settings(&cc.egui_ctx);
         if !app.config.api_key.trim().is_empty() {
             app.start_scan(&cc.egui_ctx);
         }
+
+        // The window is created hidden (see `main.rs`); by this point the
+        // renderer is initialised, so the first visible frame is a painted one
+        // rather than the white startup fill.
+        cc.egui_ctx
+            .send_viewport_cmd(egui::ViewportCommand::Visible(true));
+
         app
     }
 
@@ -259,6 +271,7 @@ impl eframe::App for ScannerApp {
     /// while the window is hidden — so events keep being folded into state even
     /// when nothing is being painted, rather than piling up in the queue.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.redirection.tick(ctx);
         self.drain_events();
         self.save_if_settled();
 

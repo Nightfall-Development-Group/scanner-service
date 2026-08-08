@@ -8,6 +8,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod redirection_surface;
 mod state;
 mod theme;
 mod ui;
@@ -70,6 +71,11 @@ fn main() -> eframe::Result<()> {
             // fullscreen-windowed game without OS chrome.
             .with_decorations(false)
             .with_transparent(transparent)
+            // Created hidden and shown by `ScannerApp::new` once rendering is
+            // ready. Showing it earlier exposes the window during wgpu's
+            // ~1 second of startup, where on Windows it renders as solid white
+            // (see `redirection_surface.rs` for the mechanism).
+            .with_visible(false)
             .with_window_level(egui::WindowLevel::AlwaysOnTop)
             .with_app_id("com.nightfalldivision.scanner"),
         ..Default::default()

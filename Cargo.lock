@@ -3188,6 +3188,7 @@ dependencies = [
  "egui",
  "env_logger",
  "log",
+ "raw-window-handle",
  "scanner-core",
  "tokio",
 ]
